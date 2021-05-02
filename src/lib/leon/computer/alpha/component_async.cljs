@@ -198,31 +198,12 @@
                             component-keys)
     on-done on-error)))
 
-(defrecord SystemMapAsync []
-  component/Lifecycle
-  (start [system]
-    (component/start-system system))
-  (stop [system]
-    (component/stop-system system))
+(extend-type component/SystemMap
   LifecycleAsync
   (start [system on-done on-error]
     (start-system-async system on-done on-error))
   (stop [system on-done on-error]
     (stop-system-async system on-done on-error)))
-
-(extend-protocol IPrintWithWriter
-  SystemMapAsync
-  (-pr-writer [this writer opts]
-    (-write writer "#<SystemMapAsync>")))
-
-(defn system-map-async
-  "Analogous to component/system-map"
-  [& keyvals]
-  (when-not (even? (count keyvals))
-    (throw (ex-info
-            "system-map requires an even number of arguments"
-            {:reason ::illegal-argument})))
-  (map->SystemMapAsync (apply array-map keyvals)))
 
 (comment
   (defrecord Sync [nom]
@@ -239,7 +220,7 @@
     (start [this on-done on-error]
       (println [nom msecs]  "starting")
       #_(on-done (assoc this :started-early true))
-      (on-error "failure")
+      #_(on-error "failure")
       ;; to test guarded-once error handling
       (js/setTimeout
        #(try (on-done
@@ -255,7 +236,7 @@
        msecs)))
 
   (def testsys
-    (system-map-async
+    (component/system-map
      :A (->Sync "A")
      :B (->Async "B" 3000)
      :C (-> (->Async "C" 5000)
