@@ -81,7 +81,8 @@
                                 (map (fn [[dk sk]]
                                        [dk (get system sk)]))
                                 deps)]
-            ((f component)
+            ((f component system key) ;; system and key used for error
+                                      ;; reporting in guarded-once
              (fn [updated-component]
                (done
                 (assoc system key updated-component)))
@@ -113,13 +114,18 @@
   (reverse (start-sequence system component-keys)))
 
 (defn- guarding-once
-  [op component on-done on-error]
+  [op component system key on-done on-error]
   (let [resolved? (volatile! false)
         guard (fn [f]
                 (fn [x]
                   (when @resolved?
                     (throw (ex-info "Asynchronous operation already resolved."
-                                    {})))
+                                    {:reason ::excessive-resolve
+                                     :component component
+                                     :op op
+                                     :system system
+                                     :system-key key
+                                     })))
                   (vreset! resolved? true)
                   (f x)))]
     (op component (guard on-done) (guard on-error))))
@@ -130,10 +136,10 @@
    (start-system-async system (keys system) on-done on-error))
   ([system component-keys on-done on-error]
    (let [u (system-updater system
-                           (fn [component]
+                           (fn [component system key]
                              (fn [done err]
                                (if (satisfies? LifecycleAsync component)
-                                 (guarding-once start component done err)
+                                 (guarding-once #'start component system key done err)
                                  (try
                                    (done (component/start component))
                                    (catch :default e (err e))))))
@@ -146,10 +152,10 @@
    (stop-system-async system (keys system) on-done on-error))
   ([system component-keys on-done on-error]
    (let [u (system-updater system
-                           (fn [component]
+                           (fn [component system key]
                              (fn [done err]
                                (if (satisfies? LifecycleAsync component)
-                                 (guarding-once stop component done err)
+                                 (guarding-once #'stop component system key done err)
                                  (try
                                    (done (component/stop component))
                                    (catch :default e (err e))))))
@@ -196,9 +202,13 @@
     LifecycleAsync
     (start [this on-done on-error]
       (println [nom msecs]  "starting")
+      (on-done (assoc this :started-early true))
+      ;; to test guarded-once error handling
       (js/setTimeout
-       #(on-done
-         (assoc this :started true))
+       #(try (on-done
+              (assoc this :started true))
+             (catch :default e
+               (prn "on-done error " e)))
        msecs))
     (stop [this on-done on-error]
       (println [nom msecs]  "stopping")
