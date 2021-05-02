@@ -14,8 +14,8 @@
 (defprotocol LifecycleAsync
   (start [component on-done on-error]
     "Begins operation of this component.  Asynchronous, returns
-    immediately.  Calls on-done with a started version or on-error
-    with an error.")
+    immediately.  Calls on-done with a started version of this
+    component, or on-error with an error.")
   (stop [component on-done on-error]
     "Ceases operation of this component.  Asynchronous, returns
     immediately.  Calls on-done with a stopped version of this
