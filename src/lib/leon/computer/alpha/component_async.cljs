@@ -21,18 +21,6 @@
     immediately.  Calls on-done with a stopped version of this
     component, or on-error with an error."))
 
-(defn- reduce-async
-  [f init coll]
-  (fn [done err]
-    (if (seq coll)
-      ((f init (first coll))
-       (fn [init]
-         ((reduce-async f init (rest coll))
-          done
-          err))
-       err)
-      (done init))))
-
 (defn- nil-component [system key]
   (ex-info (str "Component " key " was nil in system; maybe it returned nil from start or stop")
            {:reason ::component/nil-component
@@ -83,9 +71,7 @@
                                 deps)]
             ((f component system key) ;; system and key used for error
                                       ;; reporting in guarded-once
-             (fn [updated-component]
-               (done
-                (assoc system key updated-component)))
+             done
              (fn [t]
                (err
                 (ex-info (str "Error in component " key
@@ -98,20 +84,70 @@
                           :system system}
                          t))))))))))
 
+(defn- system-op
+  [system f component-keys updatable updated]
+  (let [graph (volatile!
+               (component/dependency-graph system component-keys))
+        system (volatile! system)
+        unupdated
+        (volatile!
+         (into (dep/transitive-dependencies-set @graph component-keys)
+               component-keys))
+        set-updated!
+        (fn [dep]
+          (vswap! graph updated dep)
+          (vswap! unupdated disj dep))
+        in-flight (volatile! #{})]
+    (fn [done err]
+      (let [cancelled (volatile! false)
+            err (fn [x] (when-not @cancelled
+                          (err x)
+                          (vreset! cancelled true)))]
+        ((fn step [done err]
+           (when-not @cancelled
+             (let [nodes (updatable @graph @unupdated)]
+               (if (empty? nodes)
+                 (done @system)
+                 (run! (fn [k]
+                         (when-not (contains? @in-flight k)
+                           (vswap! in-flight conj k)
+                           ((action @system k f)
+                            (fn [component]
+                              (vswap! system assoc k component)
+                              (set-updated! k)
+                              (step done err))
+                            (fn [error]
+                              (err error)))))
+                       nodes)))))
+         done err)))))
+
 (defn- system-updater
   [system f component-keys]
-  (reduce-async
-   (fn [system key] (action system key f))
-   system
-   component-keys))
+  (system-op system
+             f
+             component-keys
+             (fn [g unupdated]
+               (->> unupdated
+                    (filter #(empty? (dep/immediate-dependencies g %)))))
+             (fn [g dep]
+               (reduce (fn [g node]
+                         (dep/remove-edge g node dep))
+                       g
+                       (dep/immediate-dependents g dep)))))
 
-(defn- start-sequence [system component-keys]
-  (-> (component/dependency-graph system component-keys)
-      (dep/topo-comparator)
-      (sort component-keys)))
-
-(defn- stop-sequence [system component-keys]
-  (reverse (start-sequence system component-keys)))
+(defn- system-updater-reverse
+  [system f component-keys]
+  (system-op system
+             f
+             component-keys
+             (fn [g unupdated]
+               (->> unupdated
+                    (filter #(empty? (dep/immediate-dependents g %)))))
+             (fn [g node]
+               (reduce (fn [g dep]
+                         (dep/remove-edge g node dep))
+                       g
+                       (dep/immediate-dependencies g node)))))
 
 (defn- guarding-once
   [op component system key on-done on-error]
@@ -135,32 +171,32 @@
   ([system on-done on-error]
    (start-system-async system (keys system) on-done on-error))
   ([system component-keys on-done on-error]
-   (let [u (system-updater system
-                           (fn [component system key]
-                             (fn [done err]
-                               (if (satisfies? LifecycleAsync component)
-                                 (guarding-once #'start component system key done err)
-                                 (try
-                                   (done (component/start component))
-                                   (catch :default e (err e))))))
-                           (start-sequence system component-keys))]
-     (u on-done on-error))))
+   ((system-updater system
+                    (fn [component system key]
+                      (fn [done err]
+                        (if (satisfies? LifecycleAsync component)
+                          (guarding-once #'start component system key done err)
+                          (try
+                            (done (component/start component))
+                            (catch :default e (err e))))))
+                    component-keys)
+    on-done on-error)))
 
 (defn stop-system-async
   "Analogous to component/stop-system"
   ([system on-done on-error]
    (stop-system-async system (keys system) on-done on-error))
   ([system component-keys on-done on-error]
-   (let [u (system-updater system
-                           (fn [component system key]
-                             (fn [done err]
-                               (if (satisfies? LifecycleAsync component)
-                                 (guarding-once #'stop component system key done err)
-                                 (try
-                                   (done (component/stop component))
-                                   (catch :default e (err e))))))
-                           (stop-sequence system component-keys))]
-     (u on-done on-error))))
+   ((system-updater-reverse system
+                            (fn [component system key]
+                              (fn [done err]
+                                (if (satisfies? LifecycleAsync component)
+                                  (guarding-once #'stop component system key done err)
+                                  (try
+                                    (done (component/stop component))
+                                    (catch :default e (err e))))))
+                            component-keys)
+    on-done on-error)))
 
 (defrecord SystemMapAsync []
   component/Lifecycle
@@ -202,7 +238,8 @@
     LifecycleAsync
     (start [this on-done on-error]
       (println [nom msecs]  "starting")
-      (on-done (assoc this :started-early true))
+      #_(on-done (assoc this :started-early true))
+      (on-error "failure")
       ;; to test guarded-once error handling
       (js/setTimeout
        #(try (on-done
@@ -217,15 +254,15 @@
          (assoc this :stopped true))
        msecs)))
 
+  (def testsys
+    (system-map-async
+     :A (->Sync "A")
+     :B (->Async "B" 3000)
+     :C (-> (->Async "C" 5000)
+            (component/using [:A :B]))))
 
-  (let [sys (system-map-async
-             :A (->Sync "A")
-             :B (->Async "B" 3000)
-             :C (-> (->Async "C" 5000)
-                    (component/using [:A :B])))
-        started-sys (atom nil)
-        _
-        (start sys
+  (let [_
+        (start testsys
                (fn [started-sys]
                  (prn "s" (into {} started-sys))
                  (println "Stopping...")
