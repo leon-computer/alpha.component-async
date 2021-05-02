@@ -13,9 +13,13 @@
 
 (defprotocol LifecycleAsync
   (start [component on-done on-error]
-    "Begins operation of this component.  Asynchronous, returns immediately.  Calls on-done with a started version or on-error with an error.")
+    "Begins operation of this component.  Asynchronous, returns
+    immediately.  Calls on-done with a started version or on-error
+    with an error.")
   (stop [component on-done on-error]
-    "Ceases operation of this component.  Asynchronous, returns immediately.  Calls on-done with a stopped version of this component, or on-error with an error."))
+    "Ceases operation of this component.  Asynchronous, returns
+    immediately.  Calls on-done with a stopped version of this
+    component, or on-error with an error."))
 
 (defn- reduce-async
   [f init coll]
