@@ -28,7 +28,7 @@ Provides the `LifecycleAsync` protocol and an accompanying system loader.
 ## Rationale
 For a maximally interactive development workflow, both Stuart Sierra's reloaded workflow and component library became indispensable tools in many Clojure projects.
 
-Because ClojureScript is a single-threaded environment, blocking synchronous execution to await loading of external resources in `start` and `stop` methods is not possible.  Users expose promises, callbacks and channels from their components, delegating the waiting to their dependencies.  For every operation, even in the post-start phase, such promises have to be unwrapped.  This leads to unpleasant boilerplate and ceremony.  
+Because ClojureScript is a single-threaded environment, blocking synchronous execution to await loading of external resources in `start` and `stop` methods is not possible.  Users expose promises, callbacks and channels from their components, delegating the waiting to their dependents.  For every operation, even in the post-start phase, such promises have to be unwrapped.  This leads to unpleasant boilerplate and ceremony.  
 
 Furthermore, there are no means to await start and stop of a component system.  Therefore, a reset operation has no choice but to start a system while it might still be stopping.  For specific resources, custom synchronization workarounds are required to prevent a stopping and a starting system from competing.
 
