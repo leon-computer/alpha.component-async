@@ -35,10 +35,70 @@ Furthermore, there are no means to await start and stop of a component system.  
 Component was never designed for a host like ClojureScript, but component-async was.
 
 ## Usage
-TODO
+```clojure
+(ns my-app.core
+  (:require
+   [com.stuartsierra.component :as component]
+   [leon.computer.alpha.component-async :as component-async]))
 
-### With core.async
-TODO
+;; All you need to do is to use the new protocol to declare async
+;; components and to run your system.
+
+;; Declare async component using component-async/LifecycleAsync
+(defrecord MyAsyncComponent []
+  component-async/LifecycleAsync
+  (start [this on-done on-error]
+    (.log js/console "Starting")
+    (js/setTimeout
+     (fn []
+       (on-done
+        (assoc this :started true))
+       (.log js/console "Started"))
+     2000))
+  (stop [this on-done on-error]
+    (.log js/console "Stopping")
+    (js/setTimeout
+     (fn []
+       (on-done
+        (assoc this :stopped true))
+       (.log js/console "Stopped"))
+     2000)))
+
+;; You can mix with your existing components
+(defrecord MyClassicComponent [my-async-component]
+  component/Lifecycle
+  (start [this]
+    (.log js/console
+          (str "Started classic component, async component is: "
+               (pr-str (:started async-component))))
+    this)
+  (stop [this]
+    (.log js/console (str "Stopped classic component."))
+    this))
+
+;; You can use classic components system-map, component-async extends
+;; its protocol onto it:
+
+(def my-system
+  (component/system-map
+   :my-async-component (->MyAsyncComponent)
+   :my-classic-component (-> (map->MyClassic-component {})
+                             (component/using [:my-classic-component]))))
+
+(defn run []
+  (component-async/start
+   my-system
+   (fn [stated-system]
+     (.log js/console
+           (str "Async system started: "
+                (pr-str started-system))))
+   (fn [err]
+     (.log js/console
+           "Async system start error: " err))))
+
+;; Thats really all there is to it.
+```
+
 
 ## Copyright © Leon Grapenthin
 The MIT License (MIT)
