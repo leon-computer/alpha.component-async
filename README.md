@@ -83,7 +83,7 @@ Component was never designed for a host like ClojureScript, but component-async 
   (component/system-map
    :my-async-component (->MyAsyncComponent)
    :my-classic-component (-> (map->MyClassic-component {})
-                             (component/using [:my-classic-component]))))
+                             (component/using [:my-async-component]))))
 
 (defn run []
   (component-async/start
