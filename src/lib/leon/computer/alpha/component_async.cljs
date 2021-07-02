@@ -42,7 +42,7 @@
   (->> deps
        (some
         (fn [[dependency-key system-key]]
-          (let [dependency (get system system-key)]
+          (let [dependency (get system system-key ::not-found)]
             (cond
               (nil? dependency)
               (nil-component system system-key)
